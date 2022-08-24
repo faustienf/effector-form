@@ -1,4 +1,11 @@
-import { createEvent, createStore, Store, Event } from 'effector';
+import {
+  createEvent,
+  createStore,
+  Store,
+  Event,
+  sample,
+  Effect,
+} from 'effector';
 
 type ValueEntry<Values extends Record<string, any>> = {
   [K in keyof Values]: [K, Values[K]];
@@ -36,7 +43,8 @@ export type FormOptions<
   Errors extends Record<keyof Values, unknown>
 > = {
   initialValues: Values;
-  validate: (values: Values) => Partial<Errors>;
+  validateFx: Effect<Values, Partial<Errors>>;
+  submitFx: Effect<Values, any>;
 };
 
 export type Form<
@@ -51,6 +59,7 @@ export type Form<
   fieldEntries: FieldEntry<Values, Errors>[];
   fields: Fields<Values, Errors>;
   reset: Event<void>;
+  submit: Event<void>;
 };
 
 export const createForm = <
@@ -58,9 +67,12 @@ export const createForm = <
   Errors extends Record<keyof Values, unknown>
 >({
   initialValues,
-  validate,
+  validateFx,
+  submitFx,
 }: FormOptions<Values, Errors>): Form<Values, Errors> => {
   const reset = createEvent();
+  const inited = createEvent();
+  const submit = createEvent<void>();
   const changed = createEvent<ValueEntry<Values>>();
   const inputed = createEvent<ValueEntry<Values>>();
   const touched = createEvent<keyof Values>();
@@ -76,7 +88,10 @@ export const createForm = <
     }))
     .reset(reset);
 
-  const $errors = $values.map((values) => validate(values));
+  const $errors = createStore<Partial<Errors>>({}).on(
+    validateFx.doneData,
+    (_, errors) => errors
+  );
 
   const $isTouched = createStore<Touched<Values>>({})
     .on(touched, (isTouched, name) => ({
@@ -144,6 +159,26 @@ export const createForm = <
     fieldEntries
   ) as any;
 
+  sample({
+    clock: $values,
+    target: validateFx,
+  });
+
+  sample({
+    clock: [inited, reset],
+    source: $values,
+    target: validateFx,
+  });
+
+  sample({
+    clock: submit,
+    source: $values,
+    filter: $isValid,
+    target: submitFx,
+  });
+
+  inited();
+
   return {
     initialValues,
     $values,
@@ -153,24 +188,6 @@ export const createForm = <
     fieldEntries,
     fields,
     reset,
+    submit,
   };
 };
-
-const form = createForm({
-  initialValues: {
-    fullname: '',
-    age: 0,
-  },
-  validate: () => ({ fullname: '', age: '' }),
-});
-
-form.fields.age.inputed(2);
-form.fields.age.$error;
-form.fields.age.$value;
-
-form.fields.fullname.changed('2');
-form.fields.fullname.$error;
-form.fields.fullname.$value;
-form.fields.fullname.$isTouched;
-
-form.$errors.getState().fullname;
